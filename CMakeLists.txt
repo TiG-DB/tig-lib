@@ -24,7 +24,16 @@ if(TIG_LIBGIT2_SOURCE_DIR)
   set(BUILD_SHARED_LIBS "${_tig_saved_build_shared_libs}" CACHE BOOL "Build shared libraries" FORCE)
 
   if(NOT TARGET libgit2::libgit2)
-    if(TARGET git2)
+    if(TARGET libgit2package)
+      # libgit2 1.4 and later: "libgit2" is an object library, and libgit2package is the library built from it
+      target_include_directories(
+        libgit2package
+        INTERFACE
+          $<BUILD_INTERFACE:${TIG_LIBGIT2_SOURCE_DIR}/include>
+          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/_deps/libgit2/include>
+      )
+      add_library(libgit2::libgit2 ALIAS libgit2package)
+    elseif(TARGET git2)
       add_library(libgit2::libgit2 ALIAS git2)
     elseif(TARGET libgit2)
       add_library(libgit2::libgit2 ALIAS libgit2)
