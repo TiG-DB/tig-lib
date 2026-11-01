@@ -41,7 +41,7 @@ int main(void) {
     return 1;
   }
 
-  if (tig_repository_create("tig-smoke-repo", &repository) != TIG_OK) {
+  if (tig_repository_create("tig-smoke-repo", 0, &repository) != TIG_OK) {
     fprintf(stderr, "tig_repository_create failed: %s\n", tig_get_last_error());
     tig_shutdown();
     return 1;
