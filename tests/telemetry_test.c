@@ -206,8 +206,12 @@ int main(void) {
   write_file(REPO "/telemetry/cpu.temp/stream.yaml", original);
   free(original);
 
+  write_file(REPO "/evidence/photo.jpg", "jpeg\n");
+  CHECK(tig_repository_commit(repository, 0) == TIG_OK); /* untracked files outside /telemetry, /events and /state are left alone */
+  remove(REPO "/evidence/photo.jpg");
+
   write_file(REPO "/state/device.yaml", "cpu: arm64\n");
-  CHECK(tig_repository_commit(repository, 0) == TIG_OK); /* untracked files outside /telemetry are left alone */
+  CHECK(tig_repository_commit(repository, 0) == TIG_ERROR_REJECTED); /* /state holds only initial.yaml */
   remove(REPO "/state/device.yaml");
 
   CHECK(tig_repository_commit(repository, 0) == TIG_OK);
