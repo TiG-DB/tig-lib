@@ -39,6 +39,18 @@ typedef struct tig_options {
 
 typedef struct tig_repository tig_repository;
 
+/* Writes an armored SSH signature ("-----BEGIN SSH SIGNATURE-----" ...) over content, made with the
+   device key in the "git" namespace, e.g. by `ssh-keygen -Y sign -n git`. signature is NUL-terminated. */
+typedef tig_status (*tig_sign_callback)(void* context, const char* content, size_t content_length,
+                                        char* signature, size_t signature_size);
+
+typedef struct tig_device {
+  /* the key's line in .tig/allowed_signers, e.g. SHA256:<fingerprint> namespaces="git" ssh-ed25519 AAAA... */
+  const char* allowed_signer;
+  tig_sign_callback sign;
+  void* sign_context;
+} tig_device;
+
 typedef enum tig_value_type {
   TIG_VALUE_INTEGER,
   TIG_VALUE_DECIMAL,
@@ -75,11 +87,17 @@ TIG_API void        tig_shutdown(void);
 
 TIG_API tig_status  tig_repository_clone(const char* url, const char** path);
 
-TIG_API tig_status  tig_repository_create(const char* path, tig_repository** out);
+/* with a device, the first commit adds .tig/allowed_signers and every commit is signed */
+TIG_API tig_status  tig_repository_create(const char* path, const tig_device* device, tig_repository** out);
 TIG_API tig_status  tig_repository_open(const char* path, tig_repository** out);
 TIG_API void        tig_repository_close(tig_repository* repository);
 
-/* commits pending changes; succeeds without committing when there are none */
+/* Signs every later commit with the device's key. The key must be listed in .tig/allowed_signers;
+   a repository without that file (unsigned legacy history) gains it in a signed commit. */
+TIG_API tig_status  tig_repository_set_device(tig_repository* repository, const tig_device* device);
+
+/* commits pending changes; succeeds without committing when there are none.
+   Rejected in a repository with .tig/allowed_signers until a device is set. */
 TIG_API tig_status  tig_repository_commit(tig_repository* repository, const char* message);
 
 /* never goes backwards for a given repository */

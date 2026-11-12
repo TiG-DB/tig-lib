@@ -300,15 +300,170 @@ tig_status tig_repository_clone(const char *url, const char **path) {
   return TIG_OK;
 }
 
-/* commits the index on top of HEAD, then writes the index */
+/* an armored SSH signature for an Ed25519 key is about 300 bytes */
+#define TIG_SIGNATURE_MAX 8192
+
+static void tig_clear_device(tig_repository *repository) {
+  free(repository->allowed_signer);
+  repository->allowed_signer = 0;
+  repository->sign = 0;
+  repository->sign_context = 0;
+}
+
+static tig_status tig_store_device(tig_repository *repository, const tig_device *device, const char *context) {
+  char *line;
+
+  if (device->allowed_signer == 0 || device->allowed_signer[0] == '\0' || device->sign == 0 ||
+      strpbrk(device->allowed_signer, "\r\n") != 0) {
+    return tig__fail(TIG_ERROR_INVALID_ARGUMENT, context,
+                     "device needs a one-line allowed_signer and a sign callback");
+  }
+  line = tig_strdup(device->allowed_signer);
+  if (line == 0) {
+    return tig__fail(TIG_ERROR_GIT, context, "out of memory");
+  }
+  tig_clear_device(repository);
+  repository->allowed_signer = line;
+  repository->sign = device->sign;
+  repository->sign_context = device->sign_context;
+  return TIG_OK;
+}
+
+/* the allowed signers file in HEAD; GIT_ENOTFOUND when there is none, including before the first commit */
+static int tig_lookup_allowed_signers(git_blob **out, git_repository *git) {
+  git_reference *head = 0;
+  git_tree *tree = 0;
+  git_tree_entry *entry = 0;
+  int error;
+
+  *out = 0;
+  error = git_repository_head(&head, git);
+  if (error == GIT_EUNBORNBRANCH) {
+    error = GIT_ENOTFOUND;
+  }
+  if (error == 0) {
+    error = git_reference_peel((git_object **)&tree, head, GIT_OBJECT_TREE);
+  }
+  if (error == 0) {
+    error = git_tree_entry_bypath(&entry, tree, TIG_ALLOWED_SIGNERS);
+  }
+  if (error == 0) {
+    error = git_blob_lookup(out, git, git_tree_entry_id(entry));
+  }
+
+  git_tree_entry_free(entry);
+  git_tree_free(tree);
+  git_reference_free(head);
+  return error;
+}
+
+/* whether one line of content, ignoring trailing whitespace, is line */
+static int tig_has_line(const char *content, size_t size, const char *line) {
+  size_t line_length = strlen(line);
+  size_t start = 0;
+
+  while (start < size) {
+    size_t end = start;
+    size_t trimmed;
+
+    while (end < size && content[end] != '\n') {
+      ++end;
+    }
+    trimmed = end;
+    while (trimmed > start && (content[trimmed - 1] == '\r' || content[trimmed - 1] == ' ' ||
+                               content[trimmed - 1] == '\t')) {
+      --trimmed;
+    }
+    if (trimmed - start == line_length && memcmp(content + start, line, line_length) == 0) {
+      return 1;
+    }
+    start = end + 1;
+  }
+  return 0;
+}
+
+/* writes a commit signed with the device key, then moves HEAD's branch to it */
+static tig_status tig_create_signed_commit(tig_repository *repository, git_oid *commit_id,
+                                           const git_signature *signature, const char *message,
+                                           const git_tree *tree, const git_commit *parent) {
+  git_buf content = {0};
+  git_reference *head = 0;
+  git_reference *updated = 0;
+  const git_commit *parents[1];
+  const char *branch;
+  char *armored;
+  char reflog[256];
+  size_t length;
+  tig_status result = TIG_OK;
+
+  parents[0] = parent;
+  if (git_commit_create_buffer(&content, repository->git, signature, signature, 0, message, tree,
+                               parent != 0 ? 1 : 0, parents) != 0) {
+    return tig__fail_git("commit");
+  }
+
+  armored = (char *)calloc(1, TIG_SIGNATURE_MAX);
+  if (armored == 0) {
+    git_buf_dispose(&content);
+    return tig__fail(TIG_ERROR_GIT, "commit", "out of memory");
+  }
+  result = repository->sign(repository->sign_context, content.ptr, content.size, armored, TIG_SIGNATURE_MAX);
+  armored[TIG_SIGNATURE_MAX - 1] = '\0';
+
+  /* libgit2 indents every line break, so a trailing one would add a stray line to the header */
+  length = strlen(armored);
+  while (length > 0 && (armored[length - 1] == '\n' || armored[length - 1] == '\r' || armored[length - 1] == ' ')) {
+    armored[--length] = '\0';
+  }
+  if (result == TIG_OK && strncmp(armored, "-----BEGIN SSH SIGNATURE-----", 29) != 0) {
+    result = tig__fail(TIG_ERROR_REJECTED, "commit", "the sign callback returned no SSH signature");
+  }
+
+  if (result == TIG_OK && git_commit_create_with_signature(commit_id, repository->git, content.ptr, armored, "gpgsig") != 0) {
+    result = tig__fail_git("commit");
+  }
+  if (result == TIG_OK && git_reference_lookup(&head, repository->git, "HEAD") != 0) {
+    result = tig__fail_git("commit");
+  }
+  if (result == TIG_OK) {
+    branch = git_reference_type(head) == GIT_REFERENCE_SYMBOLIC ? git_reference_symbolic_target(head) : "HEAD";
+    snprintf(reflog, sizeof(reflog), "commit%s: %s", parent != 0 ? "" : " (initial)", message);
+    /* fails if HEAD moved since the parent was read, rather than losing that commit */
+    if (git_reference_create_matching(&updated, repository->git, branch, commit_id, 1,
+                                      parent != 0 ? git_commit_id(parent) : 0, reflog) != 0) {
+      result = tig__fail_git("commit");
+    }
+  }
+
+  git_reference_free(updated);
+  git_reference_free(head);
+  free(armored);
+  git_buf_dispose(&content);
+  return result;
+}
+
+/* commits the index on top of HEAD, signed when a device is set, then writes the index */
 static tig_status tig_commit_index(tig_repository *repository, git_index *index, const char *message) {
   git_reference *head = 0;
   git_commit *parent = 0;
   git_tree *tree = 0;
   git_signature *signature = 0;
+  git_blob *allowed_signers = 0;
   git_oid tree_id;
   git_oid commit_id;
+  tig_status result = TIG_OK;
   int error;
+
+  if (repository->sign == 0) {
+    error = tig_lookup_allowed_signers(&allowed_signers, repository->git);
+    git_blob_free(allowed_signers);
+    if (error == 0) {
+      return tig__fail(TIG_ERROR_REJECTED, "commit", "the repository has " TIG_ALLOWED_SIGNERS ", so commits must be signed; set a device");
+    }
+    if (error != GIT_ENOTFOUND) {
+      return tig__fail_git("commit");
+    }
+  }
 
   error = git_repository_head(&head, repository->git);
   if (error == 0) {
@@ -326,42 +481,138 @@ static tig_status tig_commit_index(tig_repository *repository, git_index *index,
   if (error == 0 && git_signature_default(&signature, repository->git) != 0) {
     error = git_signature_now(&signature, "TiG", "tig@localhost");
   }
-  if (error == 0) {
-    error = git_commit_create_v(&commit_id, repository->git, "HEAD", signature, signature, 0, message,
-                                tree, parent != 0 ? 1 : 0, parent);
+  if (error != 0) {
+    result = tig__fail_git("commit");
+  } else if (repository->sign != 0) {
+    result = tig_create_signed_commit(repository, &commit_id, signature, message, tree, parent);
+  } else if (git_commit_create_v(&commit_id, repository->git, "HEAD", signature, signature, 0, message, tree,
+                                 parent != 0 ? 1 : 0, parent) != 0) {
+    result = tig__fail_git("commit");
   }
-  if (error == 0) {
-    error = git_index_write(index);
+  if (result == TIG_OK && git_index_write(index) != 0) {
+    result = tig__fail_git("commit");
   }
 
   git_signature_free(signature);
   git_tree_free(tree);
   git_commit_free(parent);
   git_reference_free(head);
-  return error == 0 ? TIG_OK : tig__fail_git("commit");
+  return result;
 }
 
-static tig_status tig_commit_layout(tig_repository *repository) {
-  static const char *const layout_files[] = {".gitignore", "state/.gitkeep", "events/.gitkeep",
-                                             "telemetry/.gitkeep", "evidence/.gitkeep"};
+/* writes .tig/allowed_signers with the device's line, replacing anything left by an earlier attempt */
+static tig_status tig_write_allowed_signers(tig_repository *repository) {
+  const char *workdir = git_repository_workdir(repository->git);
+  char path[TIG_PATH_MAX];
+  FILE *file;
+  tig_status result;
+
+  if (workdir == 0) {
+    return tig__fail(TIG_ERROR_GIT, TIG_ALLOWED_SIGNERS, "repository is bare");
+  }
+  result = tig__format_path(path, sizeof(path), workdir, ".tig", "");
+  if (result == TIG_OK) {
+    result = tig__make_directory(path);
+  }
+  if (result == TIG_OK) {
+    result = tig__format_path(path, sizeof(path), workdir, TIG_ALLOWED_SIGNERS, "");
+  }
+  if (result != TIG_OK) {
+    return result;
+  }
+
+  file = fopen(path, "wb");
+  if (file == 0) {
+    return tig__fail_errno(path);
+  }
+  if (fputs(repository->allowed_signer, file) < 0 || fputc('\n', file) == EOF) {
+    fclose(file);
+    return tig__fail_errno(path);
+  }
+  return fclose(file) == 0 ? TIG_OK : tig__fail_errno(path);
+}
+
+/* commits the given files, as they are in the working tree */
+static tig_status tig_commit_files(tig_repository *repository, const char *const *files, size_t count,
+                                   const char *message) {
   git_index *index = 0;
   size_t i;
   tig_status result = TIG_OK;
 
   if (git_repository_index(&index, repository->git) != 0) {
-    return tig__fail_git("tig_repository_create");
+    return tig__fail_git("commit");
   }
 
-  for (i = 0; i < sizeof(layout_files) / sizeof(layout_files[0]) && result == TIG_OK; ++i) {
-    if (git_index_add_bypath(index, layout_files[i]) != 0) {
-      result = tig__fail_git(layout_files[i]);
+  for (i = 0; i < count && result == TIG_OK; ++i) {
+    if (git_index_add_bypath(index, files[i]) != 0) {
+      result = tig__fail_git(files[i]);
     }
   }
   if (result == TIG_OK) {
-    result = tig_commit_index(repository, index, "Create TiG repository");
+    result = tig_commit_index(repository, index, message);
+  }
+  if (result != TIG_OK) {
+    /* keep the index on disk as it was */
+    git_index_read(index, 1);
   }
 
   git_index_free(index);
+  return result;
+}
+
+static tig_status tig_commit_layout(tig_repository *repository) {
+  static const char *const layout_files[] = {".gitignore",          "state/.gitkeep",    "events/.gitkeep",
+                                             "telemetry/.gitkeep",  "evidence/.gitkeep", TIG_ALLOWED_SIGNERS};
+  size_t count = sizeof(layout_files) / sizeof(layout_files[0]);
+  tig_status result = TIG_OK;
+
+  if (repository->sign != 0) {
+    result = tig_write_allowed_signers(repository);
+  } else {
+    --count;
+  }
+  if (result == TIG_OK) {
+    result = tig_commit_files(repository, layout_files, count, "Create TiG repository");
+  }
+  return result;
+}
+
+tig_status tig_repository_set_device(tig_repository *repository, const tig_device *device) {
+  static const char *const files[] = {TIG_ALLOWED_SIGNERS};
+  git_blob *allowed_signers = 0;
+  tig_status result;
+  int error;
+
+  if (repository == 0 || device == 0) {
+    return tig__fail(TIG_ERROR_INVALID_ARGUMENT, "tig_repository_set_device", "repository and device are required");
+  }
+
+  error = tig_lookup_allowed_signers(&allowed_signers, repository->git);
+  if (error == 0) {
+    int listed = tig_has_line((const char *)git_blob_rawcontent(allowed_signers),
+                              (size_t)git_blob_rawsize(allowed_signers), device->allowed_signer != 0 ? device->allowed_signer : "");
+    git_blob_free(allowed_signers);
+    if (!listed) {
+      return tig__fail(TIG_ERROR_REJECTED, "tig_repository_set_device",
+                       "the device key is not in " TIG_ALLOWED_SIGNERS);
+    }
+    return tig_store_device(repository, device, "tig_repository_set_device");
+  }
+  if (error != GIT_ENOTFOUND) {
+    return tig__fail_git("tig_repository_set_device");
+  }
+
+  /* unsigned legacy history: this commit becomes the key commit */
+  result = tig_store_device(repository, device, "tig_repository_set_device");
+  if (result == TIG_OK) {
+    result = tig_write_allowed_signers(repository);
+  }
+  if (result == TIG_OK) {
+    result = tig_commit_files(repository, files, 1, "Add device key");
+  }
+  if (result != TIG_OK) {
+    tig_clear_device(repository);
+  }
   return result;
 }
 
@@ -428,10 +679,10 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
   return result;
 }
 
-tig_status tig_repository_create(const char *path, tig_repository **out) {
+tig_status tig_repository_create(const char *path, const tig_device *device, tig_repository **out) {
   tig_repository *repository;
   const char *workdir;
-  tig_status result;
+  tig_status result = TIG_OK;
 
   if (path == 0 || out == 0) {
     return tig__fail(TIG_ERROR_INVALID_ARGUMENT, "tig_repository_create", "path and out are required");
@@ -442,10 +693,19 @@ tig_status tig_repository_create(const char *path, tig_repository **out) {
   if (repository == 0) {
     return tig__fail(TIG_ERROR_GIT, "tig_repository_create", "out of memory");
   }
+  if (device != 0) {
+    result = tig_store_device(repository, device, "tig_repository_create");
+    if (result != TIG_OK) {
+      free(repository);
+      return result;
+    }
+  }
 
   if (git_repository_init(&repository->git, path, 0) != 0) {
+    result = tig__fail_git("tig_repository_create");
+    tig_clear_device(repository);
     free(repository);
-    return tig__fail_git("tig_repository_create");
+    return result;
   }
 
   workdir = git_repository_workdir(repository->git);
@@ -453,6 +713,9 @@ tig_status tig_repository_create(const char *path, tig_repository **out) {
                         : tig_create_layout(workdir);
   if (result == TIG_OK && git_repository_head_unborn(repository->git) == 1) {
     result = tig_commit_layout(repository);
+  } else if (result == TIG_OK && device != 0) {
+    /* an existing repository: check the key, or add it to unsigned history */
+    result = tig_repository_set_device(repository, device);
   }
   if (result != TIG_OK) {
     tig_repository_close(repository);
@@ -491,5 +754,6 @@ void tig_repository_close(tig_repository *repository) {
   }
 
   git_repository_free(repository->git);
+  tig_clear_device(repository);
   free(repository);
 }

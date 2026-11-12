@@ -84,8 +84,8 @@ Set `options.repository_storage_base_path` to the directory that
 `tig_get_last_error` describes what went wrong.
 
 The public API intentionally stays small for now: version helpers, lifecycle
-helpers, repository create/open/clone/close/commit wrappers, the TiG clock and
-telemetry. libgit2 stays an internal implementation detail.
+helpers, repository create/open/clone/close/commit wrappers, commit signing through a
+device callback, the TiG clock and telemetry. libgit2 stays an internal implementation detail.
 
 ### Telemetry
 
@@ -113,5 +113,31 @@ stream's `max_lag`, in the future, or not later than the stream's last reading.
 changed in any way other than appending, or if anything outside `/telemetry` is
 staged. Set `options.clock` to replace the system clock, e.g. in tests.
 
-Commits are not yet signed with a device key, and the TiG clock does not yet
-correct for the offset measured against TiG Notary.
+### Signed commits
+
+`COMMITS.md` requires every commit to be signed with the device's key. The
+library does no cryptography itself: pass a `tig_device` with the key's
+`.tig/allowed_signers` line and a callback that returns an SSH signature in the
+`git` namespace, e.g. from `ssh-keygen -Y sign -n git`:
+
+```c
+tig_device device = {
+  "SHA256:<fingerprint> namespaces=\"git\" ssh-ed25519 AAAA...", /* allowed_signer */
+  sign_with_ssh_keygen,                                           /* sign */
+  key_path                                                        /* sign_context */
+};
+
+tig_repository_create(path, &device, &repository);  /* first commit adds the key */
+/* or, for an existing repository: */
+tig_repository_open(path, &repository);
+tig_repository_set_device(repository, &device);
+```
+
+`tig_repository_set_device` returns `TIG_ERROR_REJECTED` if the repository's
+`.tig/allowed_signers` doesn't list the key. A repository with unsigned history
+and no such file gains it in a signed "Add device key" commit, which becomes the
+repository's key commit. Once a repository has the file, `tig_repository_commit`
+is rejected until a device is set. Without a device, a repository that has never
+had a key still commits unsigned, e.g. in tests.
+
+The TiG clock does not yet correct for the offset measured against TiG Notary.

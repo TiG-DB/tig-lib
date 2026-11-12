@@ -24,7 +24,16 @@ if(TIG_LIBGIT2_SOURCE_DIR)
   set(BUILD_SHARED_LIBS "${_tig_saved_build_shared_libs}" CACHE BOOL "Build shared libraries" FORCE)
 
   if(NOT TARGET libgit2::libgit2)
-    if(TARGET git2)
+    if(TARGET libgit2package)
+      # libgit2 1.4 and later: "libgit2" is an object library, and libgit2package is the library built from it
+      target_include_directories(
+        libgit2package
+        INTERFACE
+          $<BUILD_INTERFACE:${TIG_LIBGIT2_SOURCE_DIR}/include>
+          $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/_deps/libgit2/include>
+      )
+      add_library(libgit2::libgit2 ALIAS libgit2package)
+    elseif(TARGET git2)
       add_library(libgit2::libgit2 ALIAS git2)
     elseif(TARGET libgit2)
       add_library(libgit2::libgit2 ALIAS libgit2)
@@ -173,4 +182,15 @@ if(TIG_BUILD_TESTS)
   add_test(NAME tig-telemetry-test COMMAND tig-telemetry-test)
   set_tests_properties(tig-telemetry-test-clean PROPERTIES FIXTURES_SETUP tig-telemetry-repo)
   set_tests_properties(tig-telemetry-test PROPERTIES FIXTURES_REQUIRED tig-telemetry-repo)
+
+  # signs through ssh-keygen and checks with git, as tig-agent does
+  find_program(TIG_SSH_KEYGEN ssh-keygen)
+  find_program(TIG_GIT git)
+  if(NOT WIN32 AND TIG_SSH_KEYGEN AND TIG_GIT)
+    add_executable(tig-signing-test tests/signing_test.c)
+    target_link_libraries(tig-signing-test PRIVATE tig::tig)
+    add_test(NAME tig-signing-test COMMAND tig-signing-test)
+  else()
+    message(STATUS "Skipping tig-signing-test: needs ssh-keygen and git")
+  endif()
 endif()

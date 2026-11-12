@@ -87,7 +87,7 @@ int main(void) {
   options.clock = fake_clock;
   fake_now = T0;
 
-  if (tig_init(&options) != TIG_OK || tig_repository_create(REPO, &repository) != TIG_OK) {
+  if (tig_init(&options) != TIG_OK || tig_repository_create(REPO, 0, &repository) != TIG_OK) {
     fprintf(stderr, "setup failed: %s\n", tig_get_last_error());
     return 1;
   }

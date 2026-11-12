@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  result = tig_repository_create(argv[1], &repository);
+  result = tig_repository_create(argv[1], 0, &repository);
   if (result != TIG_OK) {
     fprintf(stderr, "failed to create tig repository at %s (%d)\n", argv[1], result);
     tig_shutdown();

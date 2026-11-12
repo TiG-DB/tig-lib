@@ -7,9 +7,15 @@
 
 #define TIG_PATH_MAX 4096
 
+#define TIG_ALLOWED_SIGNERS ".tig/allowed_signers"
+
 struct tig_repository {
   git_repository *git;
   int64_t clock_last;
+  /* set by tig_repository_create or tig_repository_set_device; commits are unsigned without it */
+  char *allowed_signer;
+  tig_sign_callback sign;
+  void *sign_context;
 };
 
 tig_status tig__fail(tig_status status, const char *context, const char *detail);
