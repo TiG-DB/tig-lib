@@ -618,14 +618,17 @@ tig_status tig_repository_set_device(tig_repository *repository, const tig_devic
 
 tig_status tig_repository_commit(tig_repository *repository, const char *message) {
   char telemetry_dir[] = "telemetry";
-  char *paths[] = {telemetry_dir};
-  git_strarray pathspec = {paths, 1};
+  char events_dir[] = "events";
+  char state_dir[] = "state";
+  char *paths[] = {telemetry_dir, events_dir, state_dir};
+  git_strarray pathspec = {paths, 3};
   git_index *index = 0;
   git_reference *head = 0;
   git_tree *head_tree = 0;
   git_diff *diff = 0;
   size_t i;
   size_t count = 0;
+  int events_changed = 0;
   int error;
   tig_status result = TIG_OK;
 
@@ -660,12 +663,21 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
   if (result == TIG_OK) {
     count = git_diff_num_deltas(diff);
     for (i = 0; i < count && result == TIG_OK; ++i) {
-      result = tig__telemetry_check_change(repository->git, index, git_diff_get_delta(diff, i));
+      const git_diff_delta *delta = git_diff_get_delta(diff, i);
+      const char *path = delta->status == GIT_DELTA_DELETED ? delta->old_file.path : delta->new_file.path;
+
+      if (!tig__is_event_path(path)) {
+        result = tig__telemetry_check_change(repository->git, index, delta);
+      }
     }
+  }
+  if (result == TIG_OK) {
+    result = tig__events_check_commit(repository, index, diff, &events_changed);
   }
 
   if (result == TIG_OK && count > 0) {
-    result = tig_commit_index(repository, index, message != 0 ? message : "Record telemetry");
+    result = tig_commit_index(repository, index,
+                              message != 0 ? message : events_changed ? "Record events" : "Record telemetry");
   }
   if (result != TIG_OK && index != 0) {
     /* drop what was staged here, keeping the index on disk as it was */

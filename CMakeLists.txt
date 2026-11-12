@@ -63,8 +63,52 @@ else()
   find_package(libgit2 1.5 REQUIRED MODULE)
 endif()
 
-add_library(tig src/tig.c src/telemetry.c)
+# libyaml reads events and state. Its sources are compiled into libtig, so consumers never see it.
+set(TIG_LIBYAML_SOURCE_DIR "" CACHE PATH "Optional path to a libyaml 0.2.5 source checkout; downloaded when empty")
+if(TIG_LIBYAML_SOURCE_DIR)
+  set(_tig_libyaml_dir "${TIG_LIBYAML_SOURCE_DIR}")
+else()
+  if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+  endif()
+  if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+  include(FetchContent)
+  FetchContent_Declare(
+    tig_libyaml
+    URL https://github.com/yaml/libyaml/archive/refs/tags/0.2.5.tar.gz
+    URL_HASH SHA256=fa240dbf262be053f3898006d502d514936c818e422afdcf33921c63bed9bf2e
+  )
+  FetchContent_GetProperties(tig_libyaml)
+  if(NOT tig_libyaml_POPULATED)
+    FetchContent_Populate(tig_libyaml)
+  endif()
+  set(_tig_libyaml_dir "${tig_libyaml_SOURCE_DIR}")
+endif()
+set(
+  _tig_libyaml_sources
+  "${_tig_libyaml_dir}/src/api.c"
+  "${_tig_libyaml_dir}/src/dumper.c"
+  "${_tig_libyaml_dir}/src/emitter.c"
+  "${_tig_libyaml_dir}/src/loader.c"
+  "${_tig_libyaml_dir}/src/parser.c"
+  "${_tig_libyaml_dir}/src/reader.c"
+  "${_tig_libyaml_dir}/src/scanner.c"
+  "${_tig_libyaml_dir}/src/writer.c"
+)
+# libyaml calls strdup, which strict C99 (as when built beside libgit2) leaves undeclared without POSIX
+set_source_files_properties(
+  ${_tig_libyaml_sources}
+  PROPERTIES
+    COMPILE_DEFINITIONS
+      "YAML_VERSION_MAJOR=0;YAML_VERSION_MINOR=2;YAML_VERSION_PATCH=5;YAML_VERSION_STRING=\"0.2.5\";_POSIX_C_SOURCE=200809L"
+)
+
+add_library(tig src/tig.c src/telemetry.c src/node.c src/events.c ${_tig_libyaml_sources})
 add_library(tig::tig ALIAS tig)
+target_include_directories(tig PRIVATE "${_tig_libyaml_dir}/include")
+target_compile_definitions(tig PRIVATE YAML_DECLARE_STATIC)
 
 target_compile_features(tig PUBLIC c_std_99)
 target_include_directories(
@@ -182,6 +226,14 @@ if(TIG_BUILD_TESTS)
   add_test(NAME tig-telemetry-test COMMAND tig-telemetry-test)
   set_tests_properties(tig-telemetry-test-clean PROPERTIES FIXTURES_SETUP tig-telemetry-repo)
   set_tests_properties(tig-telemetry-test PROPERTIES FIXTURES_REQUIRED tig-telemetry-repo)
+
+  add_executable(tig-events-test tests/events_test.c)
+  target_link_libraries(tig-events-test PRIVATE tig::tig)
+
+  add_test(NAME tig-events-test-clean COMMAND ${CMAKE_COMMAND} -E remove_directory tig-events-repo)
+  add_test(NAME tig-events-test COMMAND tig-events-test)
+  set_tests_properties(tig-events-test-clean PROPERTIES FIXTURES_SETUP tig-events-repo)
+  set_tests_properties(tig-events-test PROPERTIES FIXTURES_REQUIRED tig-events-repo)
 
   # signs through ssh-keygen and checks with git, as tig-agent does
   find_program(TIG_SSH_KEYGEN ssh-keygen)

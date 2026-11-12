@@ -26,8 +26,22 @@ tig_status tig__format_path(char *out, size_t out_size, const char *dir, const c
                             const char *suffix);
 tig_status tig__make_directory(const char *path);
 
+/* how far ahead of the TiG clock a reading or event may be */
+#define TIG_CLOCK_SKEW_MS 5000
+
 /* telemetry.c: whether a staged change follows the append-only rule */
 tig_status tig__telemetry_check_change(git_repository *git, git_index *index,
                                        const git_diff_delta *delta);
+int        tig__is_valid_stream_name(const char *name);
+/* days since 1970-01-01 */
+int64_t    tig__days_from_civil(int64_t year, int month, int day);
+
+/* node.c: context names the source in errors */
+tig_status tig__node_parse(const char *yaml, size_t length, const char *context, tig_node **out);
+
+/* events.c: whether a path is under /events or /state, and whether the staged changes there follow
+   EVENTS.md, "Writing"; *changed is set if there are any */
+int        tig__is_event_path(const char *path);
+tig_status tig__events_check_commit(tig_repository *repository, git_index *index, git_diff *diff, int *changed);
 
 #endif

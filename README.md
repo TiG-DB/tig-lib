@@ -8,6 +8,7 @@ exposing libgit2 to libtig users.
 - CMake 3.16 or newer
 - A C99 compiler
 - libgit2 1.5 or newer at build time
+- libyaml 0.2.5, which CMake downloads and compiles into libtig (set `TIG_LIBYAML_SOURCE_DIR` to build offline)
 
 On macOS with Homebrew:
 
@@ -38,6 +39,7 @@ Build options:
 - `TIG_LIBGIT2_SOURCE_DIR`: optional path to a libgit2 source checkout to build into libtig
 - `TIG_LIBGIT2_STATIC_LIBRARY`: optional path to a prebuilt static libgit2 archive
 - `TIG_LIBGIT2_INCLUDE_DIR`: include path required with `TIG_LIBGIT2_STATIC_LIBRARY`
+- `TIG_LIBYAML_SOURCE_DIR`: optional path to a libyaml 0.2.5 source tree, instead of downloading it
 - `BUILD_SHARED_LIBS`: build shared libraries instead of static libraries, defaults to CMake's standard behavior
 
 For a standalone static libtig, point CMake at either a libgit2 source checkout
@@ -85,7 +87,8 @@ Set `options.repository_storage_base_path` to the directory that
 
 The public API intentionally stays small for now: version helpers, lifecycle
 helpers, repository create/open/clone/close/commit wrappers, commit signing through a
-device callback, the TiG clock and telemetry. libgit2 stays an internal implementation detail.
+device callback, the TiG clock, telemetry, and state and events. libgit2 and libyaml stay internal
+implementation details.
 
 ### Telemetry
 
@@ -110,8 +113,46 @@ tig_repository_commit(repository, "Record telemetry");
 `tig_telemetry_append` returns `TIG_ERROR_REJECTED` for a reading older than the
 stream's `max_lag`, in the future, or not later than the stream's last reading.
 `tig_repository_commit` returns `TIG_ERROR_REJECTED` if `/telemetry` has
-changed in any way other than appending, or if anything outside `/telemetry` is
-staged. Set `options.clock` to replace the system clock, e.g. in tests.
+changed in any way other than appending, or if anything outside `/telemetry`,
+`/events` and `/state` is staged. Set `options.clock` to replace the system
+clock, e.g. in tests.
+
+### State and events
+
+State and events follow `EVENTS.md`. They are YAML, held as `tig_node` values:
+build them with `tig_node_map`, `tig_node_set` and the scalar constructors, or
+parse them with `tig_node_parse`. Like telemetry, they are written to the
+working tree and committed by `tig_repository_commit`:
+
+```c
+tig_node* event = tig_node_map();
+tig_node* actions = tig_node_list();
+tig_node* action = tig_node_map();
+char id[TIG_EVENT_ID_MAX + 1];
+
+tig_node_set(event, "time", tig_node_string("2026-11-04T07:12:31Z"));
+tig_node_set(action, "type", tig_node_string("booted"));
+tig_node_append(actions, action);
+tig_node_set(event, "actions", actions);
+
+tig_event_add(repository, event, id, sizeof(id)); /* events/2026/2026-11-04.<id>.yaml */
+tig_node_free(event);
+```
+
+`tig_event_add` chooses a random ID that no event has used, in the working tree
+or in history. `tig_event_correct` replaces an event, keeping its ID and moving
+its file if its time changed, and `tig_event_delete` removes one.
+`tig_state_write_initial` writes `state/initial.yaml`. `tig_state_replay`
+rebuilds state at a time, and `tig_events_each` visits events in replay order.
+
+Each write returns `TIG_ERROR_REJECTED` unless it follows "Writing" in
+`EVENTS.md`: the event is well formed, its time isn't in the future (instants
+may be 5 seconds ahead of the TiG clock, and dates 14 hours, since a date is
+where it happened), its evidence files are already in the index, and every
+event still replays, including those dated after it. `tig_repository_commit`
+makes the same checks on whatever is in `/events` and `/state`, so files edited
+by hand are checked too, and it rejects an event that reuses an ID from history
+unless the event is moving to a new path in the same commit.
 
 ### Signed commits
 

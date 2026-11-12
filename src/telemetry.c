@@ -18,8 +18,6 @@
 #define TIG_COLUMNS_MAX 64
 #define TIG_ROW_MAX 4096
 #define TIG_DEFINITION_MAX 8192
-/* how far ahead of the TiG clock a reading may be */
-#define TIG_CLOCK_SKEW_MS 5000
 /* 9999-12-31T23:59:59.999Z */
 #define TIG_TIME_MAX_MS INT64_C(253402300799999)
 
@@ -83,7 +81,7 @@ static int tig_is_letter(char c) {
   return tig_is_lower(c) || (c >= 'A' && c <= 'Z');
 }
 
-static int tig_is_valid_stream_name(const char *name) {
+int tig__is_valid_stream_name(const char *name) {
   size_t length = strlen(name);
   size_t i;
 
@@ -166,7 +164,7 @@ static int tig_find_name(const char *const *names, size_t count, const char *val
 /* --- time --- */
 
 /* days since 1970-01-01, from http://howardhinnant.github.io/date_algorithms.html */
-static int64_t tig_days_from_civil(int64_t year, int month, int day) {
+int64_t tig__days_from_civil(int64_t year, int month, int day) {
   int64_t era;
   int64_t year_of_era;
   int64_t day_of_year;
@@ -273,7 +271,7 @@ static int tig_parse_time(const char *text, size_t length, int64_t *unix_ms) {
     return 0;
   }
 
-  value = tig_days_from_civil(civil.year, civil.month, civil.day) * 86400000 +
+  value = tig__days_from_civil(civil.year, civil.month, civil.day) * 86400000 +
           (int64_t)civil.hour * 3600000 + (int64_t)civil.minute * 60000 + (int64_t)civil.second * 1000 +
           civil.millisecond;
 
@@ -771,7 +769,7 @@ static tig_status tig_stream_path(tig_repository *repository, const char *stream
   if (repository == 0 || stream == 0) {
     return tig__fail(TIG_ERROR_INVALID_ARGUMENT, "telemetry", "repository and stream are required");
   }
-  if (!tig_is_valid_stream_name(stream)) {
+  if (!tig__is_valid_stream_name(stream)) {
     return tig__fail(TIG_ERROR_INVALID_ARGUMENT, stream,
                      "stream names are lowercase letters, digits, '.' and '-', starting with a letter or digit");
   }
@@ -982,7 +980,7 @@ tig_status tig__telemetry_check_change(git_repository *git, git_index *index, co
   tig_status result;
 
   if (strncmp(path, "telemetry/", strlen("telemetry/")) != 0) {
-    return tig__fail(TIG_ERROR_REJECTED, path, "only telemetry can be committed");
+    return tig__fail(TIG_ERROR_REJECTED, path, "only telemetry, events and state can be committed");
   }
   stream = path + strlen("telemetry/");
   file = strchr(stream, '/');
@@ -992,7 +990,7 @@ tig_status tig__telemetry_check_change(git_repository *git, git_index *index, co
   memcpy(stream_name, stream, (size_t)(file - stream));
   stream_name[file - stream] = '\0';
   ++file;
-  if (!tig_is_valid_stream_name(stream_name)) {
+  if (!tig__is_valid_stream_name(stream_name)) {
     return tig__fail(TIG_ERROR_REJECTED, path, "invalid stream name");
   }
 
