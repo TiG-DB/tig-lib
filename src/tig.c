@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "templates.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -220,6 +221,18 @@ static tig_status tig_create_layout(const char *workdir) {
   result = tig__format_path(path, sizeof(path), workdir, ".gitignore", "");
   if (result == TIG_OK) {
     result = tig_write_file_if_missing(path, "/summaries/\n");
+  }
+  if (result == TIG_OK) {
+    result = tig__format_path(path, sizeof(path), workdir, TIG_README_PATH, "");
+  }
+  if (result == TIG_OK) {
+    result = tig_write_file_if_missing(path, tig_readme_template);
+  }
+  if (result == TIG_OK) {
+    result = tig__format_path(path, sizeof(path), workdir, TIG_AGENTS_PATH, "");
+  }
+  if (result == TIG_OK) {
+    result = tig_write_file_if_missing(path, tig_agents_template);
   }
   return result;
 }
@@ -562,7 +575,8 @@ static tig_status tig_commit_files(tig_repository *repository, const char *const
 
 static tig_status tig_commit_layout(tig_repository *repository) {
   static const char *const layout_files[] = {".gitignore",          "state/.gitkeep",    "events/.gitkeep",
-                                             "telemetry/.gitkeep",  "evidence/.gitkeep", TIG_ALLOWED_SIGNERS};
+                                             "telemetry/.gitkeep",  "evidence/.gitkeep", TIG_README_PATH,
+                                             TIG_AGENTS_PATH,       TIG_ALLOWED_SIGNERS};
   size_t count = sizeof(layout_files) / sizeof(layout_files[0]);
   tig_status result = TIG_OK;
 

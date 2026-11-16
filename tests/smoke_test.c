@@ -48,6 +48,21 @@ int main(void) {
   }
   tig_repository_close(repository);
 
+  {
+    static const char* const files[] = {"tig-smoke-repo/README.md", "tig-smoke-repo/AGENTS.md"};
+    size_t i;
+
+    for (i = 0; i < sizeof(files) / sizeof(files[0]); ++i) {
+      FILE* file = fopen(files[i], "r");
+      if (file == 0) {
+        fprintf(stderr, "new repository is missing %s\n", files[i]);
+        tig_shutdown();
+        return 1;
+      }
+      fclose(file);
+    }
+  }
+
   if (tig_repository_open("tig-smoke-repo", &repository) != TIG_OK) {
     fprintf(stderr, "tig_repository_open failed: %s\n", tig_get_last_error());
     tig_shutdown();
