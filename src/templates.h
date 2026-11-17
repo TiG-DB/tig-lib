@@ -37,14 +37,14 @@ static const char tig_readme_template[] =
     "\n"
     "## More\n"
     "\n"
-    "The specification is at https://github.com/jchown/tig-docs.\n"
+    "The specification is at https://github.com/TiG-DB/tig-docs.\n"
     "Agents and scripts working in this repository should read `AGENTS.md`.\n";
 
 static const char tig_agents_template[] =
     "# AGENTS.md\n"
     "\n"
     "Instructions for AI agents and scripts working in this TiG repository. See `README.md` for what TiG is\n"
-    "and the specification at https://github.com/jchown/tig-docs for the details.\n"
+    "and the specification at https://github.com/TiG-DB/tig-docs for the details.\n"
     "\n"
     "## What this repository is\n"
     "\n"
