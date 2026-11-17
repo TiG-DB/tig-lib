@@ -182,3 +182,11 @@ is rejected until a device is set. Without a device, a repository that has never
 had a key still commits unsigned, e.g. in tests.
 
 The TiG clock does not yet correct for the offset measured against TiG Notary.
+
+## Licence
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+
+The names "TiG" and "TiG Notary" and the TiG logos are not covered by that
+licence and may not be used without permission, except to say accurately that your
+work is compatible with TiG.

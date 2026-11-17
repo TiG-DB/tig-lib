@@ -1,0 +1,11 @@
+libtig
+Copyright 2026 The TiG Authors
+
+This product is part of TiG (Timeline in Git).
+
+Trademarks: the names "TiG" and "TiG Notary", and the TiG logos, are
+not licensed under the Apache License. You may implement and use the TiG
+specification and this code freely, but you may not use these names or logos
+to name your product or to suggest that it is official, endorsed, or certified
+by the TiG project, without prior written permission. Accurately describing
+your work as "compatible with TiG" is fine.
