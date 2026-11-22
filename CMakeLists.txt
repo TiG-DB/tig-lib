@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(
   tig
-  VERSION 0.3.0
+  VERSION 0.4.0
   DESCRIPTION "Portable C library built on libgit2"
   LANGUAGES C
 )
@@ -105,7 +105,7 @@ set_source_files_properties(
       "YAML_VERSION_MAJOR=0;YAML_VERSION_MINOR=2;YAML_VERSION_PATCH=5;YAML_VERSION_STRING=\"0.2.5\";_POSIX_C_SOURCE=200809L"
 )
 
-add_library(tig src/tig.c src/telemetry.c src/node.c src/events.c ${_tig_libyaml_sources})
+add_library(tig src/tig.c src/telemetry.c src/node.c src/events.c src/evidence.c ${_tig_libyaml_sources})
 add_library(tig::tig ALIAS tig)
 target_include_directories(tig PRIVATE "${_tig_libyaml_dir}/include")
 target_compile_definitions(tig PRIVATE YAML_DECLARE_STATIC)
@@ -234,6 +234,14 @@ if(TIG_BUILD_TESTS)
   add_test(NAME tig-events-test COMMAND tig-events-test)
   set_tests_properties(tig-events-test-clean PROPERTIES FIXTURES_SETUP tig-events-repo)
   set_tests_properties(tig-events-test PROPERTIES FIXTURES_REQUIRED tig-events-repo)
+
+  add_executable(tig-evidence-test tests/evidence_test.c)
+  target_link_libraries(tig-evidence-test PRIVATE tig::tig)
+
+  add_test(NAME tig-evidence-test-clean COMMAND ${CMAKE_COMMAND} -E remove_directory tig-evidence-repo)
+  add_test(NAME tig-evidence-test COMMAND tig-evidence-test)
+  set_tests_properties(tig-evidence-test-clean PROPERTIES FIXTURES_SETUP tig-evidence-repo)
+  set_tests_properties(tig-evidence-test PROPERTIES FIXTURES_REQUIRED tig-evidence-repo)
 
   # signs through ssh-keygen and checks with git, as tig-agent does
   find_program(TIG_SSH_KEYGEN ssh-keygen)

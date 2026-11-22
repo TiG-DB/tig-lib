@@ -15,7 +15,7 @@ int main(void) {
     return 1;
   }
 
-  if (strcmp(tig_version(), "0.3.0") != 0) {
+  if (strcmp(tig_version(), "0.4.0") != 0) {
     fprintf(stderr, "unexpected tig version: %s\n", tig_version());
     tig_shutdown();
     return 1;

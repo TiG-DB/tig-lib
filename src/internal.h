@@ -39,6 +39,11 @@ int64_t    tig__days_from_civil(int64_t year, int month, int day);
 /* node.c: context names the source in errors */
 tig_status tig__node_parse(const char *yaml, size_t length, const char *context, tig_node **out);
 
+/* evidence.c: whether a path is under /evidence, and whether a staged change there follows EVIDENCE.md: files
+   can be added, but never changed or removed */
+int        tig__is_evidence_path(const char *path);
+tig_status tig__evidence_check_change(const git_diff_delta *delta);
+
 /* events.c: whether a path is under /events or /state, and whether the staged changes there follow
    EVENTS.md, "Writing"; *changed is set if there are any */
 int        tig__is_event_path(const char *path);

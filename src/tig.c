@@ -634,8 +634,13 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
   char telemetry_dir[] = "telemetry";
   char events_dir[] = "events";
   char state_dir[] = "state";
+  char evidence_dir[] = "evidence";
+  /* new files are staged here, except evidence, which comes in through tig_evidence_add... */
   char *paths[] = {telemetry_dir, events_dir, state_dir};
   git_strarray pathspec = {paths, 3};
+  /* ...but changes to, and removals of, files that are already tracked are always seen */
+  char *tracked_paths[] = {telemetry_dir, events_dir, state_dir, evidence_dir};
+  git_strarray tracked = {tracked_paths, 4};
   git_index *index = 0;
   git_reference *head = 0;
   git_tree *head_tree = 0;
@@ -643,6 +648,7 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
   size_t i;
   size_t count = 0;
   int events_changed = 0;
+  int evidence_changed = 0;
   int error;
   tig_status result = TIG_OK;
 
@@ -665,7 +671,7 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
     error = git_index_add_all(index, &pathspec, GIT_INDEX_ADD_DEFAULT, 0, 0);
   }
   if (error == 0) {
-    error = git_index_update_all(index, &pathspec, 0, 0);
+    error = git_index_update_all(index, &tracked, 0, 0);
   }
   if (error == 0) {
     error = git_diff_tree_to_index(&diff, repository->git, head_tree, index, 0);
@@ -680,7 +686,10 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
       const git_diff_delta *delta = git_diff_get_delta(diff, i);
       const char *path = delta->status == GIT_DELTA_DELETED ? delta->old_file.path : delta->new_file.path;
 
-      if (!tig__is_event_path(path)) {
+      if (tig__is_evidence_path(path)) {
+        evidence_changed = 1;
+        result = tig__evidence_check_change(delta);
+      } else if (!tig__is_event_path(path)) {
         result = tig__telemetry_check_change(repository->git, index, delta);
       }
     }
@@ -691,7 +700,10 @@ tig_status tig_repository_commit(tig_repository *repository, const char *message
 
   if (result == TIG_OK && count > 0) {
     result = tig_commit_index(repository, index,
-                              message != 0 ? message : events_changed ? "Record events" : "Record telemetry");
+                              message != 0         ? message
+                              : events_changed     ? "Record events"
+                              : evidence_changed   ? "Add evidence"
+                                                   : "Record telemetry");
   }
   if (result != TIG_OK && index != 0) {
     /* drop what was staged here, keeping the index on disk as it was */

@@ -96,8 +96,8 @@ TIG_API void        tig_repository_close(tig_repository* repository);
    a repository without that file (unsigned legacy history) gains it in a signed commit. */
 TIG_API tig_status  tig_repository_set_device(tig_repository* repository, const tig_device* device);
 
-/* commits pending changes to /telemetry, /events and /state; succeeds without committing when there are none.
-   Rejected in a repository with .tig/allowed_signers until a device is set. */
+/* commits pending changes to /telemetry, /events, /state and /evidence; succeeds without committing when there are
+   none. Rejected in a repository with .tig/allowed_signers until a device is set. */
 TIG_API tig_status  tig_repository_commit(tig_repository* repository, const char* message);
 
 /* never goes backwards for a given repository */
@@ -185,6 +185,26 @@ TIG_API tig_status  tig_event_read(tig_repository* repository, const char* id, t
 typedef tig_status (*tig_event_visitor)(void* context, const char* id, const tig_node* event);
 /* every event, in replay order */
 TIG_API tig_status  tig_events_each(tig_repository* repository, tig_event_visitor visit, void* context);
+
+/* --- evidence (EVIDENCE.md) ---
+
+   Evidence is the files that support events: photos, receipts, certificates. Add one with tig_evidence_add, list its
+   path in an event's `evidence`, and tig_repository_commit commits both, in one commit or two. Evidence is never
+   changed or removed once committed, so a later commit that does either is rejected (TIG_ERROR_REJECTED). */
+
+#define TIG_EVIDENCE_NAME_MAX 100
+/* room for a path from tig_evidence_add, "/evidence/" and a name */
+#define TIG_EVIDENCE_PATH_MAX (10 + TIG_EVIDENCE_NAME_MAX + 1)
+
+/* Copies the file at source into /evidence as name and stages it, so that events can list it straight away. name is
+   1 to TIG_EVIDENCE_NAME_MAX letters, digits, '.', '_' and '-', starting with a letter or digit; NULL uses the source's
+   own file name. path receives what an event lists, e.g. /evidence/2024-03-11-invoice.pdf, and needs room for
+   TIG_EVIDENCE_PATH_MAX bytes.
+   TIG_ERROR_REJECTED if the name isn't allowed, a file of that name is already there (evidence is never replaced) or
+   the source is empty; TIG_ERROR_NOT_FOUND if the source can't be found. The file is not committed until
+   tig_repository_commit. */
+TIG_API tig_status  tig_evidence_add(tig_repository* repository, const char* source, const char* name,
+                                     char* path, size_t path_size);
 
 #ifdef __cplusplus
 }

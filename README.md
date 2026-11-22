@@ -114,8 +114,8 @@ tig_repository_commit(repository, "Record telemetry");
 stream's `max_lag`, in the future, or not later than the stream's last reading.
 `tig_repository_commit` returns `TIG_ERROR_REJECTED` if `/telemetry` has
 changed in any way other than appending, or if anything outside `/telemetry`,
-`/events` and `/state` is staged. Set `options.clock` to replace the system
-clock, e.g. in tests.
+`/events`, `/state` and `/evidence` is staged. Set `options.clock` to replace the
+system clock, e.g. in tests.
 
 ### State and events
 
@@ -153,6 +153,37 @@ event still replays, including those dated after it. `tig_repository_commit`
 makes the same checks on whatever is in `/events` and `/state`, so files edited
 by hand are checked too, and it rejects an event that reuses an ID from history
 unless the event is moving to a new path in the same commit.
+
+### Evidence
+
+Evidence is the files that support events: photos, receipts, certificates
+(`EVIDENCE.md`). `tig_evidence_add` copies a file into `/evidence` and stages
+it, so an event can list it straight away. List it by the path it returns:
+
+```c
+char path[TIG_EVIDENCE_PATH_MAX];
+tig_node* paths = tig_node_list();
+
+tig_evidence_add(repository, "scan0001.pdf", "2024-03-11-invoice.pdf", path, sizeof(path));
+/* path is now "/evidence/2024-03-11-invoice.pdf" */
+tig_node_append(paths, tig_node_string(path));
+tig_node_set(event, "evidence", paths); /* then tig_event_add, as above */
+
+tig_repository_commit(repository, 0); /* commits the event and its evidence together */
+```
+
+A name is up to `TIG_EVIDENCE_NAME_MAX` letters, digits, `.`, `_` and `-`,
+starting with a letter or digit; pass `NULL` to use the source's own file name.
+Evidence is never replaced, so adding a name that is already there is
+`TIG_ERROR_REJECTED`, and so is an empty file. Once evidence is committed it is
+fixed: `tig_repository_commit` returns `TIG_ERROR_REJECTED` for a later commit
+that changes or removes it. It only takes evidence that came in through
+`tig_evidence_add` (or was staged with Git), so a file dropped into `/evidence`
+by hand is left alone, and an event can't list it.
+
+Evidence may be committed before the event that lists it, or in the same
+commit. `tig_repository_commit` with no message calls an evidence-only commit
+"Add evidence".
 
 ### Signed commits
 

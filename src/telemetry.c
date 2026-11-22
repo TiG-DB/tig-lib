@@ -980,7 +980,7 @@ tig_status tig__telemetry_check_change(git_repository *git, git_index *index, co
   tig_status result;
 
   if (strncmp(path, "telemetry/", strlen("telemetry/")) != 0) {
-    return tig__fail(TIG_ERROR_REJECTED, path, "only telemetry, events and state can be committed");
+    return tig__fail(TIG_ERROR_REJECTED, path, "only telemetry, events, state and evidence can be committed");
   }
   stream = path + strlen("telemetry/");
   file = strchr(stream, '/');
