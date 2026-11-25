@@ -8,7 +8,8 @@ exposing libgit2 to libtig users.
 - CMake 3.16 or newer
 - A C99 compiler
 - libgit2 1.5 or newer at build time
-- libyaml 0.2.5, which CMake downloads and compiles into libtig (set `TIG_LIBYAML_SOURCE_DIR` to build offline)
+- libyaml 0.2.5 and Monocypher 4.0.3, which CMake downloads and compiles into libtig (set `TIG_LIBYAML_SOURCE_DIR`
+  and `TIG_MONOCYPHER_SOURCE_DIR` to build offline)
 
 On macOS with Homebrew:
 
@@ -40,6 +41,7 @@ Build options:
 - `TIG_LIBGIT2_STATIC_LIBRARY`: optional path to a prebuilt static libgit2 archive
 - `TIG_LIBGIT2_INCLUDE_DIR`: include path required with `TIG_LIBGIT2_STATIC_LIBRARY`
 - `TIG_LIBYAML_SOURCE_DIR`: optional path to a libyaml 0.2.5 source tree, instead of downloading it
+- `TIG_MONOCYPHER_SOURCE_DIR`: optional path to a Monocypher 4.0.3 source tree, instead of downloading it
 - `BUILD_SHARED_LIBS`: build shared libraries instead of static libraries, defaults to CMake's standard behavior
 
 For a standalone static libtig, point CMake at either a libgit2 source checkout
@@ -86,9 +88,9 @@ Set `options.repository_storage_base_path` to the directory that
 `tig_get_last_error` describes what went wrong.
 
 The public API intentionally stays small for now: version helpers, lifecycle
-helpers, repository create/open/clone/close/commit wrappers, commit signing through a
-device callback, the TiG clock, telemetry, and state and events. libgit2 and libyaml stay internal
-implementation details.
+helpers, repository create/open/clone/close/commit wrappers, device keys and commit
+signing, the TiG clock, telemetry, and state and events. libgit2, libyaml and Monocypher
+stay internal implementation details.
 
 ### Telemetry
 
@@ -188,9 +190,32 @@ commit. `tig_repository_commit` with no message calls an evidence-only commit
 ### Signed commits
 
 `COMMITS.md` requires every commit to be signed with the device's key. The
-library does no cryptography itself: pass a `tig_device` with the key's
-`.tig/allowed_signers` line and a callback that returns an SSH signature in the
-`git` namespace, e.g. from `ssh-keygen -Y sign -n git`:
+library can hold the key and sign itself:
+
+```c
+tig_key *key;
+char text[TIG_KEY_EXPORT_MAX];
+
+/* the first run: make a key, and store the text somewhere only you can read */
+tig_key_generate(&key);
+tig_key_export(key, text, sizeof(text));
+/* later runs */
+tig_key_parse(text, length, &key);
+
+tig_repository_create(path, tig_key_device(key), &repository);
+```
+
+A key is Ed25519, and its text is an unencrypted OpenSSH private key file, so
+`ssh-keygen` reads keys the library makes and the library reads keys
+`ssh-keygen` makes without a passphrase. Encrypting that text at rest is the
+caller's job. `tig_key_sign` signs in any namespace, e.g. `tig-notary` for a
+notary request. Free the key with `tig_key_free` after closing the repositories
+that use it. The library doesn't verify signatures yet.
+
+A caller can instead sign elsewhere, e.g. with a hardware key or a program: pass
+a `tig_device` with the key's `.tig/allowed_signers` line and a callback that
+returns an SSH signature in the `git` namespace, e.g. from
+`ssh-keygen -Y sign -n git`:
 
 ```c
 tig_device device = {
@@ -211,6 +236,11 @@ and no such file gains it in a signed "Add device key" commit, which becomes the
 repository's key commit. Once a repository has the file, `tig_repository_commit`
 is rejected until a device is set. Without a device, a repository that has never
 had a key still commits unsigned, e.g. in tests.
+
+Git, and so `libtig`, refuses to open a repository that another user owns. A
+caller that has checked who can write to its repositories, such as a service
+whose data an administrator also reads, can set `allow_other_owners` in
+`tig_options`.
 
 The TiG clock does not yet correct for the offset measured against TiG Notary.
 

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(
   tig
-  VERSION 0.4.0
+  VERSION 0.5.0
   DESCRIPTION "Portable C library built on libgit2"
   LANGUAGES C
 )
@@ -65,16 +65,18 @@ endif()
 
 # libyaml reads events and state. Its sources are compiled into libtig, so consumers never see it.
 set(TIG_LIBYAML_SOURCE_DIR "" CACHE PATH "Optional path to a libyaml 0.2.5 source checkout; downloaded when empty")
+
+if(POLICY CMP0169)
+  cmake_policy(SET CMP0169 OLD)
+endif()
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+include(FetchContent)
+
 if(TIG_LIBYAML_SOURCE_DIR)
   set(_tig_libyaml_dir "${TIG_LIBYAML_SOURCE_DIR}")
 else()
-  if(POLICY CMP0169)
-    cmake_policy(SET CMP0169 OLD)
-  endif()
-  if(POLICY CMP0135)
-    cmake_policy(SET CMP0135 NEW)
-  endif()
-  include(FetchContent)
   FetchContent_Declare(
     tig_libyaml
     URL https://github.com/yaml/libyaml/archive/refs/tags/0.2.5.tar.gz
@@ -105,9 +107,45 @@ set_source_files_properties(
       "YAML_VERSION_MAJOR=0;YAML_VERSION_MINOR=2;YAML_VERSION_PATCH=5;YAML_VERSION_STRING=\"0.2.5\";_POSIX_C_SOURCE=200809L"
 )
 
-add_library(tig src/tig.c src/telemetry.c src/node.c src/events.c src/evidence.c ${_tig_libyaml_sources})
+# Monocypher does the Ed25519 arithmetic for device keys. Like libyaml, its sources are compiled into libtig.
+set(TIG_MONOCYPHER_SOURCE_DIR "" CACHE PATH "Optional path to a Monocypher 4.0.3 source tree; downloaded when empty")
+if(TIG_MONOCYPHER_SOURCE_DIR)
+  set(_tig_monocypher_dir "${TIG_MONOCYPHER_SOURCE_DIR}")
+else()
+  FetchContent_Declare(
+    tig_monocypher
+    URL https://github.com/LoupVaillant/Monocypher/releases/download/4.0.3/monocypher-4.0.3.tar.gz
+    URL_HASH SHA256=8cc9bc341a66249016db9bd70e9142d8d0aef9945973744b1ac05dbc55d8ee66
+  )
+  FetchContent_GetProperties(tig_monocypher)
+  if(NOT tig_monocypher_POPULATED)
+    FetchContent_Populate(tig_monocypher)
+  endif()
+  set(_tig_monocypher_dir "${tig_monocypher_SOURCE_DIR}")
+endif()
+set(
+  _tig_monocypher_sources
+  "${_tig_monocypher_dir}/src/monocypher.c"
+  "${_tig_monocypher_dir}/src/optional/monocypher-ed25519.c"
+)
+
+add_library(
+  tig
+  src/tig.c
+  src/telemetry.c
+  src/node.c
+  src/events.c
+  src/evidence.c
+  src/key.c
+  src/sha256.c
+  ${_tig_libyaml_sources}
+  ${_tig_monocypher_sources}
+)
 add_library(tig::tig ALIAS tig)
-target_include_directories(tig PRIVATE "${_tig_libyaml_dir}/include")
+target_include_directories(
+  tig
+  PRIVATE "${_tig_libyaml_dir}/include" "${_tig_monocypher_dir}/src" "${_tig_monocypher_dir}/src/optional"
+)
 target_compile_definitions(tig PRIVATE YAML_DECLARE_STATIC)
 
 target_compile_features(tig PUBLIC c_std_99)
@@ -243,7 +281,14 @@ if(TIG_BUILD_TESTS)
   set_tests_properties(tig-evidence-test-clean PROPERTIES FIXTURES_SETUP tig-evidence-repo)
   set_tests_properties(tig-evidence-test PROPERTIES FIXTURES_REQUIRED tig-evidence-repo)
 
-  # signs through ssh-keygen and checks with git, as tig-agent does
+  add_executable(tig-key-test tests/key_test.c)
+  target_link_libraries(tig-key-test PRIVATE tig::tig)
+  add_test(NAME tig-key-test-clean COMMAND ${CMAKE_COMMAND} -E remove_directory tig-key-repo)
+  add_test(NAME tig-key-test COMMAND tig-key-test)
+  set_tests_properties(tig-key-test-clean PROPERTIES FIXTURES_SETUP tig-key-repo)
+  set_tests_properties(tig-key-test PROPERTIES FIXTURES_REQUIRED tig-key-repo)
+
+  # signs through ssh-keygen and in-process, and checks with git
   find_program(TIG_SSH_KEYGEN ssh-keygen)
   find_program(TIG_GIT git)
   if(NOT WIN32 AND TIG_SSH_KEYGEN AND TIG_GIT)

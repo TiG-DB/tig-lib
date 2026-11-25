@@ -1,3 +1,6 @@
+/* for rand_s */
+#define _CRT_RAND_S
+
 #include "internal.h"
 #include "templates.h"
 
@@ -102,6 +105,13 @@ tig_status tig_init(const tig_options *options) {
     return tig__fail_git("tig_init");
   }
 
+  /* libgit2 otherwise refuses a repository that another user owns */
+  if (git_libgit2_opts(GIT_OPT_SET_OWNER_VALIDATION, options != 0 && options->allow_other_owners ? 0 : 1) != 0) {
+    free(base_path);
+    git_libgit2_shutdown();
+    return tig__fail_git("tig_init");
+  }
+
   free(tig_storage_base_path);
   tig_storage_base_path = base_path;
   tig_clock = options != 0 ? options->clock : 0;
@@ -163,6 +173,31 @@ tig_status tig__format_path(char *out, size_t out_size, const char *dir, const c
     return tig__fail(TIG_ERROR_BUFFER_TOO_SMALL, "path too long", dir);
   }
   return TIG_OK;
+}
+
+tig_status tig__random_bytes(unsigned char *out, size_t count) {
+#ifdef _WIN32
+  size_t i;
+
+  for (i = 0; i < count; ++i) {
+    unsigned int value;
+    if (rand_s(&value) != 0) {
+      return tig__fail(TIG_ERROR_GIT, "random numbers", "none available");
+    }
+    out[i] = (unsigned char)value;
+  }
+  return TIG_OK;
+#else
+  FILE *file = fopen("/dev/urandom", "rb");
+  size_t read;
+
+  if (file == 0) {
+    return tig__fail_errno("/dev/urandom");
+  }
+  read = fread(out, 1, count, file);
+  fclose(file);
+  return read == count ? TIG_OK : tig__fail(TIG_ERROR_GIT, "/dev/urandom", "short read");
+#endif
 }
 
 tig_status tig__make_directory(const char *path) {

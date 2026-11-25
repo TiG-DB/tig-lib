@@ -1192,37 +1192,12 @@ tig_status tig_state_replay(tig_repository *repository, int64_t unix_ms, tig_nod
   return result;
 }
 
-static tig_status tig_random_bytes(unsigned char *out, size_t count) {
-#ifdef _WIN32
-  size_t i;
-
-  for (i = 0; i < count; ++i) {
-    unsigned int value;
-    if (rand_s(&value) != 0) {
-      return tig__fail(TIG_ERROR_GIT, "event ID", "no random numbers");
-    }
-    out[i] = (unsigned char)value;
-  }
-  return TIG_OK;
-#else
-  FILE *file = fopen("/dev/urandom", "rb");
-  size_t read;
-
-  if (file == 0) {
-    return tig__fail_errno("/dev/urandom");
-  }
-  read = fread(out, 1, count, file);
-  fclose(file);
-  return read == count ? TIG_OK : tig__fail(TIG_ERROR_GIT, "/dev/urandom", "short read");
-#endif
-}
-
 static tig_status tig_random_id(char *id) {
   static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz0123456789";
   unsigned char bytes[64];
   size_t length = 0;
   size_t i;
-  tig_status result = tig_random_bytes(bytes, sizeof(bytes));
+  tig_status result = tig__random_bytes(bytes, sizeof(bytes));
 
   /* drops values past the largest multiple of 36, so every character is equally likely */
   for (i = 0; result == TIG_OK && i < sizeof(bytes) && length < TIG_EVENT_ID_LENGTH; ++i) {

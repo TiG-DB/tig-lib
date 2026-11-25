@@ -18,7 +18,8 @@ Keep the `docs/` submodule pointing at a `tig-docs` commit that contains the spe
 ## Layout
 
 - `include/tig/tig.h`: the public API. Keep libgit2 types out of it.
-- `src/`: implementation (`tig.c`, `node.c`, `events.c`, `telemetry.c`, `internal.h`).
+- `src/`: implementation (`tig.c`, `node.c`, `events.c`, `evidence.c`, `telemetry.c`, `key.c`, `sha256.c`,
+  `internal.h`).
 - `tests/`, `examples/`: tests and example programs.
 
 Build and test:
