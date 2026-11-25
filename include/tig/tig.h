@@ -35,6 +35,10 @@ typedef struct tig_options {
   /* optional: replaces the system clock, e.g. in tests */
   tig_clock_source clock;
   void* clock_context;
+  /* optional: opens repositories that another user owns, e.g. a service's, opened by an administrator. Git refuses
+     them by default because their configuration is then someone else's, so set this only when the caller has checked
+     who can write to every repository it opens. */
+  int allow_other_owners;
 } tig_options;
 
 typedef struct tig_repository tig_repository;
@@ -99,6 +103,38 @@ TIG_API tig_status  tig_repository_set_device(tig_repository* repository, const 
 /* commits pending changes to /telemetry, /events, /state and /evidence; succeeds without committing when there are
    none. Rejected in a repository with .tig/allowed_signers until a device is set. */
 TIG_API tig_status  tig_repository_commit(tig_repository* repository, const char* message);
+
+/* --- device keys (COMMITS.md, "Device keys") ---
+
+   An Ed25519 key that the library holds and signs with, in place of a sign callback of the caller's own. It is kept
+   as an unencrypted OpenSSH private key file, which ssh-keygen reads too: protecting that text where it is stored is
+   the caller's job, as is wiping any copy of it. */
+
+typedef struct tig_key tig_key;
+
+/* room for the text from tig_key_export */
+#define TIG_KEY_EXPORT_MAX 1024
+/* room for a signature from tig_key_sign in a namespace of up to 64 characters */
+#define TIG_KEY_SIGNATURE_MAX 1024
+
+TIG_API tig_status  tig_key_generate(tig_key** out);
+/* reads an OpenSSH private key file; TIG_ERROR_REJECTED if it has a passphrase or isn't Ed25519 */
+TIG_API tig_status  tig_key_parse(const char* text, size_t length, tig_key** out);
+/* writes the private key as a NUL-terminated OpenSSH private key file */
+TIG_API tig_status  tig_key_export(const tig_key* key, char* out, size_t out_size);
+/* "ssh-ed25519 AAAA...", with no comment */
+TIG_API const char* tig_key_public(const tig_key* key);
+/* SHA256:..., as printed by `ssh-keygen -l` */
+TIG_API const char* tig_key_fingerprint(const tig_key* key);
+/* for tig_repository_create and tig_repository_set_device. It belongs to the key, which must outlive every
+   repository using it. */
+TIG_API const tig_device* tig_key_device(const tig_key* key);
+/* an armored SSH signature over content in the namespace, e.g. "git" or "tig-notary", as
+   `ssh-keygen -Y sign` makes */
+TIG_API tig_status  tig_key_sign(const tig_key* key, const char* name_space, const void* content,
+                                 size_t content_length, char* signature, size_t signature_size);
+/* wipes the key from memory */
+TIG_API void        tig_key_free(tig_key* key);
 
 /* never goes backwards for a given repository */
 TIG_API tig_status  tig_clock_now(tig_repository* repository, int64_t* unix_ms);

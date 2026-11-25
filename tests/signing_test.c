@@ -1,4 +1,4 @@
-/* Signs commits with a device key through ssh-keygen and checks them with git verify-commit.
+/* Signs commits with a device key, through ssh-keygen and in-process, and checks them with git verify-commit.
    Needs a POSIX shell, ssh-keygen and git on PATH; run from an empty working directory. */
 #include "tig/tig.h"
 
@@ -196,6 +196,44 @@ int main(void) {
     CHECK(record(repository, "0.7") != TIG_OK);
     tig_repository_close(repository);
     CHECK(signatures(WORK "/signed", "GGG"));
+  }
+
+  /* the library signs in-process, with a key it made or one that ssh-keygen made */
+  {
+    char text[TIG_KEY_EXPORT_MAX];
+    char expected[1024];
+    long length;
+    tig_key* generated = 0;
+    tig_key* loaded = 0;
+
+    CHECK(tig_key_generate(&generated) == TIG_OK);
+    CHECK(tig_repository_create(WORK "/in-process", tig_key_device(generated), &repository) == TIG_OK);
+    CHECK(record(repository, "2.5") == TIG_OK);
+    tig_repository_close(repository);
+    CHECK(signatures(WORK "/in-process", "GG"));
+
+    /* and ssh-keygen reads the key it exports */
+    CHECK(tig_key_export(generated, text, sizeof(text)) == TIG_OK);
+    {
+      FILE* file = fopen(WORK "/exported", "wb");
+      CHECK(file != 0 && fputs(text, file) >= 0 && fclose(file) == 0);
+    }
+    CHECK(run("chmod 600 " WORK "/exported && ssh-keygen -y -f " WORK "/exported | cut -d' ' -f1,2 | tr -d '\\n' > "
+              WORK "/exported.pub") == 0);
+    CHECK(read_into(WORK "/exported.pub", expected, sizeof(expected)) > 0);
+    CHECK(strcmp(expected, tig_key_public(generated)) == 0);
+
+    length = read_into(WORK "/device", text, sizeof(text));
+    CHECK(length > 0 && tig_key_parse(text, (size_t)length, &loaded) == TIG_OK);
+    CHECK(strcmp(tig_key_device(loaded)->allowed_signer, line) == 0);
+    CHECK(tig_repository_open(WORK "/signed", &repository) == TIG_OK);
+    CHECK(tig_repository_set_device(repository, tig_key_device(loaded)) == TIG_OK);
+    CHECK(record(repository, "0.8") == TIG_OK);
+    tig_repository_close(repository);
+    CHECK(signatures(WORK "/signed", "GGGG"));
+
+    tig_key_free(generated);
+    tig_key_free(loaded);
   }
 
   tig_shutdown();

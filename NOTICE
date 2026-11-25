@@ -3,6 +3,11 @@ Copyright 2026 The TiG Authors
 
 This product is part of TiG (Timeline in Git).
 
+libtig compiles in Monocypher (https://monocypher.org), used under the
+2-clause BSD licence: Copyright (c) 2017-2023, Loup Vaillant, Michael Savage
+and Fabio Scotoni. All rights reserved. Its licence is in LICENCE.md in the
+Monocypher source.
+
 Trademarks: the names "TiG" and "TiG Notary", and the TiG logos, are
 not licensed under the Apache License. You may implement and use the TiG
 specification and this code freely, but you may not use these names or logos

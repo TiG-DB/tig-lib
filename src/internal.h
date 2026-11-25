@@ -25,6 +25,11 @@ tig_status tig__fail_errno(const char *context);
 tig_status tig__format_path(char *out, size_t out_size, const char *dir, const char *name,
                             const char *suffix);
 tig_status tig__make_directory(const char *path);
+/* cryptographically secure */
+tig_status tig__random_bytes(unsigned char *out, size_t count);
+
+/* sha256.c */
+void tig__sha256(const void *data, size_t length, unsigned char digest[32]);
 
 /* how far ahead of the TiG clock a reading or event may be */
 #define TIG_CLOCK_SKEW_MS 5000
